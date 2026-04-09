@@ -57,6 +57,30 @@ async fn main() -> lumberjack::Result<()> {
 - **Protocol-layer errors** (unknown frame type, oversized length, malformed zlib, non-monotonic seq) drop the connection. Lumberjack has no resync marker, so a desynchronized stream cannot be recovered safely.
 - **Payload-layer errors** (a single event whose JSON body fails to deserialize) are logged via `tracing::warn!` and the offending event is dropped from the batch; the rest of the batch is delivered normally.
 
+## Performance
+
+A baseline harness is provided in `examples/baseline.rs` and a head-to-head comparison against `elastic/go-lumber` lives at [`docs/benchmarks/baseline.md`](docs/benchmarks/baseline.md). At 4 concurrent clients sending 250-byte JSON events:
+
+- **~605k events/s, 144 MiB/s** payload throughput
+- **~2.0× faster** than `go-lumber` on the same workload
+- **~3× less memory** (peak RSS ~8 MiB vs ~12 MiB)
+
+Run it yourself:
+
+```bash
+cargo run --release --example baseline -- --clients 4 --duration 10
+```
+
+## Interop tests
+
+`tests/interop.rs` runs the Rust client against a real `go-lumber` server and vice versa, using a small Go bridge binary in `bench_harness/interop/`. They are gated behind an environment variable so the regular test suite does not require Go:
+
+```bash
+LUMBERJACK_INTEROP=1 cargo test --test interop -- --test-threads=1
+```
+
+The first run builds the Go helper automatically (requires `go` on `PATH`).
+
 ## License
 
 MIT OR Apache-2.0
