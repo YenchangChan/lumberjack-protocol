@@ -232,7 +232,7 @@ mod tests {
         let mut buf = BytesMut::new();
         frame.encode(&mut buf);
 
-        assert_eq!(&buf[..2], &[b'2', b'J']);
+        assert_eq!(&buf[..2], b"2J");
         assert_eq!(buf.len(), 2 + 4 + 4 + payload.len());
 
         let decoded = Frame::decode(&mut buf).unwrap().unwrap();
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn json_oversize_errors() {
         let mut buf = BytesMut::new();
-        buf.extend_from_slice(&[b'2', b'J']);
+        buf.extend_from_slice(b"2J");
         buf.extend_from_slice(&0u32.to_be_bytes());
         buf.extend_from_slice(&10u32.to_be_bytes());
         buf.extend_from_slice(&[0u8; 10]);
@@ -334,7 +334,7 @@ mod tests {
     #[cfg(feature = "compression")]
     fn compressed_corrupted_payload_errors() {
         let mut buf = BytesMut::new();
-        buf.extend_from_slice(&[b'2', b'C']);
+        buf.extend_from_slice(b"2C");
         buf.extend_from_slice(&4u32.to_be_bytes());
         buf.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
         assert!(matches!(Frame::decode(&mut buf), Err(Error::Compression(_))));

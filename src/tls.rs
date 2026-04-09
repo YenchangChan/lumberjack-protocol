@@ -1,8 +1,6 @@
 //! Convenience constructors for rustls. Use these or build `TlsAcceptor` /
 //! `TlsConnector` directly with rustls APIs — both work with this crate.
 
-#![cfg(feature = "tls")]
-
 use std::path::Path;
 use std::sync::Arc;
 
