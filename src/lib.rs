@@ -12,3 +12,8 @@ pub mod server;
 
 #[cfg(feature = "tls")]
 pub mod tls;
+
+pub use client::{Client, ClientBuilder};
+pub use error::{Error, Result};
+pub use frame::Frame;
+pub use server::{Batch, Server, ServerBuilder};
