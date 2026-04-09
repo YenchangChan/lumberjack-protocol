@@ -266,6 +266,8 @@ impl ServerBuilder {
                     accepted = listener.accept() => {
                         match accepted {
                             Ok((stream, _peer)) => {
+                                // Disable Nagle so per-batch ACK frames are not delayed.
+                                let _ = stream.set_nodelay(true);
                                 let cfg = cfg.clone();
                                 let tx = tx.clone();
                                 #[cfg(feature = "tls")]

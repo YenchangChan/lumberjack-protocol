@@ -81,6 +81,9 @@ impl ClientBuilder {
             None => TcpStream::connect(target).await?,
             Some((start, end)) => connect_with_port_range(target, start, end).await?,
         };
+        // Disable Nagle: ACK frames are tiny and would otherwise be delayed,
+        // crippling per-batch round-trip latency.
+        let _ = stream.set_nodelay(true);
 
         let boxed: BoxedStream = {
             #[cfg(feature = "tls")]
