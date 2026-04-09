@@ -1,9 +1,27 @@
 [package]
-name = "lumberjack"
+name = "lumberjack-protocol"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.75"
 description = "Async Rust implementation of the Lumberjack v2 protocol (Elastic Beats / Logstash)."
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/YenchangChan/lumberjack-protocol"
+homepage = "https://github.com/YenchangChan/lumberjack-protocol"
+documentation = "https://docs.rs/lumberjack"
+readme = "README.md"
+keywords = ["lumberjack", "logstash", "beats", "elastic", "tokio"]
+categories = ["network-programming", "asynchronous"]
+authors = ["YenchangChan"]
+exclude = [
+    "/bench_harness",
+    "/docs/benchmarks",
+    "/docs/superpowers",
+    "/.github",
+]
+
+[lib]
+name = "lumberjack"
+path = "src/lib.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["net", "rt", "io-util", "macros", "sync", "time"] }
