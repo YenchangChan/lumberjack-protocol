@@ -36,6 +36,14 @@ name = "frame"
 harness = false
 
 [[example]]
+name = "server"
+path = "examples/server.rs"
+
+[[example]]
+name = "client"
+path = "examples/client.rs"
+
+[[example]]
 name = "baseline"
 path = "examples/baseline.rs"
 
