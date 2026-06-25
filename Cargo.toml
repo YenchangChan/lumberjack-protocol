@@ -1,6 +1,6 @@
 [package]
 name = "lumberjack-protocol"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.75"
 description = "Async Rust implementation of the Lumberjack v2 protocol (Elastic Beats / Logstash)."

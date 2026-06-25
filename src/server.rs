@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -255,6 +256,12 @@ impl ServerBuilder {
             keepalive: self.keepalive,
         });
 
+        // Live connection gauge, shared with the accept loop. Each accepted
+        // connection holds an `ActiveGuard` for the lifetime of its handler
+        // task, so the count reflects currently-open connections.
+        let active = Arc::new(AtomicUsize::new(0));
+        let active_loop = active.clone();
+
         #[cfg(feature = "tls")]
         let tls_acceptor: Arc<Option<tokio_rustls::TlsAcceptor>> = Arc::new(self.tls);
 
@@ -270,9 +277,13 @@ impl ServerBuilder {
                                 let _ = stream.set_nodelay(true);
                                 let cfg = cfg.clone();
                                 let tx = tx.clone();
+                                // Count this connection as active until its handler
+                                // task ends (covers any TLS handshake time too).
+                                let guard = ActiveGuard::new(active_loop.clone());
                                 #[cfg(feature = "tls")]
                                 let tls = tls_acceptor.clone();
                                 tokio::spawn(async move {
+                                    let _guard = guard;
                                     let result: Result<()> = async {
                                         #[cfg(feature = "tls")]
                                         {
@@ -311,7 +322,25 @@ impl ServerBuilder {
             rx,
             shutdown: Some(shutdown_tx),
             local_addr,
+            active,
         })
+    }
+}
+
+/// RAII guard incrementing the live-connection gauge on creation and
+/// decrementing it on drop (i.e. when the connection handler task ends).
+struct ActiveGuard(Arc<AtomicUsize>);
+
+impl ActiveGuard {
+    fn new(counter: Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
+        ActiveGuard(counter)
+    }
+}
+
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -319,6 +348,7 @@ pub struct Server {
     rx: BatchReceiver,
     shutdown: Option<oneshot::Sender<()>>,
     local_addr: SocketAddr,
+    active: Arc<AtomicUsize>,
 }
 
 impl Server {
@@ -332,6 +362,12 @@ impl Server {
 
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    /// Number of currently-open connections (accepted and whose handler task
+    /// has not yet finished). Cheap atomic load; safe to poll for metrics.
+    pub fn active_connections(&self) -> usize {
+        self.active.load(Ordering::Relaxed)
     }
 
     pub async fn recv(&mut self) -> Option<Batch> {
@@ -617,4 +653,34 @@ mod tests {
         assert!(res.is_err(), "expected connection refused after drop");
     }
 
+    #[tokio::test]
+    async fn active_connections_tracks_open_and_closed() {
+        let server = Server::bind("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr();
+        assert_eq!(server.active_connections(), 0);
+
+        // Open three raw connections. They send nothing, so each handler task
+        // simply blocks waiting for a Window frame — counted as active.
+        let mut conns = Vec::new();
+        for _ in 0..3 {
+            conns.push(tokio::net::TcpStream::connect(addr).await.unwrap());
+        }
+        wait_until(|| server.active_connections() == 3).await;
+
+        // Closing the client sockets ends the handler tasks, dropping guards.
+        drop(conns);
+        wait_until(|| server.active_connections() == 0).await;
+    }
+
+    /// Poll `cond` until true or panic after ~1s; the accept loop registers
+    /// connections asynchronously, so we cannot assert synchronously.
+    async fn wait_until<F: Fn() -> bool>(cond: F) {
+        for _ in 0..100 {
+            if cond() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("condition not met within timeout");
+    }
 }
