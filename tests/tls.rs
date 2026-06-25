@@ -58,7 +58,8 @@ async fn tls_round_trip() {
     });
 
     let batch = server.recv().await.unwrap();
-    assert_eq!(batch.events()[0]["hello"], "tls");
+    let ev: serde_json::Value = serde_json::from_slice(&batch.events()[0]).unwrap();
+    assert_eq!(ev["hello"], "tls");
     batch.ack();
     client_task.await.unwrap();
 }

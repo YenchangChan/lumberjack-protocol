@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
-use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::sync::{mpsc, oneshot};
@@ -20,14 +19,18 @@ use crate::frame::{Frame, DEFAULT_MAX_FRAME_SIZE};
 // Batch
 // ---------------------------------------------------------------------------
 
+/// A received batch. Events are kept as their **raw payload bytes** exactly as
+/// they arrived on the wire — the server does not parse or validate them. The
+/// consumer decides whether and how to decode each payload (e.g. JSON), which
+/// avoids a forced parse on the hot path and lets callers route on raw bytes.
 pub struct Batch {
-    events: Vec<Value>,
+    events: Vec<Bytes>,
     last_seq: u32,
     ack: Option<oneshot::Sender<u32>>,
 }
 
 impl Batch {
-    pub(crate) fn new(events: Vec<Value>, last_seq: u32, ack: oneshot::Sender<u32>) -> Self {
+    pub(crate) fn new(events: Vec<Bytes>, last_seq: u32, ack: oneshot::Sender<u32>) -> Self {
         Self {
             events,
             last_seq,
@@ -35,11 +38,13 @@ impl Batch {
         }
     }
 
-    pub fn events(&self) -> &[Value] {
+    /// The raw payload bytes of each event in the batch, in wire order.
+    pub fn events(&self) -> &[Bytes] {
         &self.events
     }
 
-    pub fn into_events(mut self) -> Vec<Value> {
+    /// Take ownership of the raw event payloads.
+    pub fn into_events(mut self) -> Vec<Bytes> {
         std::mem::take(&mut self.events)
     }
 
@@ -101,7 +106,7 @@ where
             None => return Ok(()), // clean EOF
         };
 
-        let mut events: Vec<Value> = Vec::with_capacity(window as usize);
+        let mut events: Vec<Bytes> = Vec::with_capacity(window as usize);
         let mut received: u32 = 0;
         let mut last_seq: u32 = 0;
         let mut prev_seq: u32 = 0;
@@ -120,7 +125,7 @@ where
                     prev_seq = seq;
                     last_seq = seq;
                     received += 1;
-                    push_json_event(&mut events, &data);
+                    events.push(data);
                 }
                 Frame::Compressed(inner) => {
                     let mut buf = bytes::BytesMut::from(&inner[..]);
@@ -137,7 +142,7 @@ where
                                 prev_seq = seq;
                                 last_seq = seq;
                                 received += 1;
-                                push_json_event(&mut events, &data);
+                                events.push(data);
                             }
                             Some(_) => {
                                 return Err(Error::UnexpectedFrame(
@@ -184,13 +189,6 @@ where
             }
         };
         framed.send(Frame::Ack(acked)).await?;
-    }
-}
-
-fn push_json_event(out: &mut Vec<Value>, data: &Bytes) {
-    match serde_json::from_slice::<Value>(data) {
-        Ok(v) => out.push(v),
-        Err(e) => warn!("dropping event with invalid JSON: {e}"),
     }
 }
 
@@ -391,12 +389,19 @@ impl Drop for Server {
 mod tests {
     use super::*;
     use futures_util::{SinkExt, StreamExt};
+    use serde_json::Value;
     use tokio::io::duplex;
+
+    /// Parse a raw event payload as JSON (events are now raw bytes; tests that
+    /// want to inspect fields decode them here).
+    fn json_of(payload: &Bytes) -> Value {
+        serde_json::from_slice(payload.as_ref()).unwrap()
+    }
 
     #[tokio::test]
     async fn explicit_ack_sends_last_seq() {
         let (tx, rx) = oneshot::channel();
-        let batch = Batch::new(vec![Value::Null], 7, tx);
+        let batch = Batch::new(vec![Bytes::from_static(b"null")], 7, tx);
         batch.ack();
         assert_eq!(rx.await.unwrap(), 7);
     }
@@ -404,7 +409,7 @@ mod tests {
     #[tokio::test]
     async fn drop_without_ack_still_sends_last_seq() {
         let (tx, rx) = oneshot::channel();
-        let batch = Batch::new(vec![Value::Null, Value::Null], 12, tx);
+        let batch = Batch::new(vec![Bytes::from_static(b"null"), Bytes::from_static(b"null")], 12, tx);
         drop(batch);
         assert_eq!(rx.await.unwrap(), 12);
     }
@@ -453,8 +458,8 @@ mod tests {
 
         let batch = out_rx.recv().await.unwrap();
         assert_eq!(batch.len(), 2);
-        assert_eq!(batch.events()[0]["a"], 1);
-        assert_eq!(batch.events()[1]["b"], 2);
+        assert_eq!(json_of(&batch.events()[0])["a"], 1);
+        assert_eq!(json_of(&batch.events()[1])["b"], 2);
         batch.ack();
 
         match client.next().await.unwrap().unwrap() {
@@ -467,7 +472,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_skips_invalid_json_event() {
+    async fn server_forwards_payloads_without_parsing() {
         let (client_io, server_io) = duplex(64 * 1024);
         let (out_tx, mut out_rx) = mpsc::channel::<Batch>(8);
         let server = tokio::spawn(async move {
@@ -500,8 +505,11 @@ mod tests {
             .unwrap();
 
         let batch = out_rx.recv().await.unwrap();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch.events()[0]["ok"], true);
+        // The server no longer parses or drops events: both payloads are
+        // forwarded as-is, including the one that is not valid JSON.
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch.events()[0].as_ref(), b"not json");
+        assert_eq!(json_of(&batch.events()[1])["ok"], true);
         batch.ack();
         // Drain the ack so the server's write completes before we drop the client.
         match client.next().await.unwrap().unwrap() {
@@ -630,7 +638,7 @@ mod tests {
         });
 
         let batch = server.recv().await.unwrap();
-        assert_eq!(batch.events()[0]["x"], 42);
+        assert_eq!(json_of(&batch.events()[0])["x"], 42);
         batch.ack();
         client_task.await.unwrap();
     }

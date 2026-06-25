@@ -140,7 +140,8 @@ async fn go_client_to_rust_server() {
             .await
             .expect("server channel closed before all events");
         for ev in batch.events() {
-            received.push(ev.clone());
+            // Events are raw payload bytes; decode to JSON for assertions.
+            received.push(serde_json::from_slice::<Value>(ev.as_ref()).unwrap());
         }
         batch.ack();
     }

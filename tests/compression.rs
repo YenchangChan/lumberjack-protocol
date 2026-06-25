@@ -26,8 +26,10 @@ async fn compressed_batch_round_trip() {
 
     let batch = server.recv().await.unwrap();
     assert_eq!(batch.len(), 50);
-    assert_eq!(batch.events()[0]["i"], 0);
-    assert_eq!(batch.events()[49]["i"], 49);
+    let first: serde_json::Value = serde_json::from_slice(&batch.events()[0]).unwrap();
+    let last: serde_json::Value = serde_json::from_slice(&batch.events()[49]).unwrap();
+    assert_eq!(first["i"], 0);
+    assert_eq!(last["i"], 49);
     batch.ack();
     client_task.await.unwrap();
 }

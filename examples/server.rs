@@ -25,7 +25,8 @@ async fn main() -> Result<()> {
     while let Some(batch) = server.recv().await {
         println!("got batch of {} events:", batch.len());
         for ev in batch.events() {
-            println!("  {ev}");
+            // Events are raw payload bytes; print them as text for the demo.
+            println!("  {}", String::from_utf8_lossy(ev));
         }
         // Acknowledge so the client's blocking `send()` returns. Dropping the
         // batch without calling `ack()` would auto-ack on Drop, but calling it

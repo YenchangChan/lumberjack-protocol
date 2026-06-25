@@ -55,7 +55,7 @@ async fn main() -> lumberjack::Result<()> {
 ## Error policy
 
 - **Protocol-layer errors** (unknown frame type, oversized length, malformed zlib, non-monotonic seq) drop the connection. Lumberjack has no resync marker, so a desynchronized stream cannot be recovered safely.
-- **Payload-layer errors** (a single event whose JSON body fails to deserialize) are logged via `tracing::warn!` and the offending event is dropped from the batch; the rest of the batch is delivered normally.
+- **Payload contents are not inspected.** `Batch::events()` yields each event's raw payload bytes exactly as received; the server does not parse or validate them. The consumer decides whether and how to decode each payload (e.g. JSON), which keeps a forced parse off the hot path and lets callers route on raw bytes.
 
 ## Performance
 
